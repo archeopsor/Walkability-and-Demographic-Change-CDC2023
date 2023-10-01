@@ -1,0 +1,189 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(parameters)
+
+```
+
+
+```{r}
+data = read_excel("SocialSciences_Dataset.xlsx", sheet='Chapter 1', range='A3:H373', col_names=T) %>% drop_na() %>% rename(
+  CBSA_Code = "CBSA\r\nCode",
+  pop_2010 = "Population",
+  pop_2000 = "...5",
+  pop_rank_2010 = "Population rank1",
+  pop_rank_2000 = "...7",
+  land_area = "Land area in\r\nsquare miles,\r\n2010"
+)
+data1 = read_excel("SocialSciences_Dataset.xlsx", sheet='Chapter 2', range='A3:G373', col_names=T) %>% drop_na() %>% rename(
+  CBSA_Code = "CBSA\r\nCode",
+  pop_2010 = "Population",
+  pop_2000 = "...5",
+  change_num = "Change, 2000 to 2010",
+  change_pct = "...7"
+)
+data2 = read_excel("SocialSciences_Dataset.xlsx", sheet='Chapter 3', range='A3:K374', col_names=T) %>% drop_na() %>% rename(
+  CBSA_Code = "CBSA\r\nCode",
+  pop_2010 = "Population",
+  pop_2000 = "...5",
+  land_area = "Land area in\r\nsquare miles, 2010",
+  dens_overall_2000 = "Population density1",
+  dens_overall_2010 = "...8",
+  dens_weighted_2000 = "...9",
+  dens_weighted_2010 = "...10",
+  dens_change = "...11",
+)
+data3 = read_excel("SocialSciences_Dataset.xlsx", sheet='Chapter 4', range='A3:CS374', col_names=T) %>% drop_na()  %>% rename(
+  CBSA_Code = "CBSA\r\nCode",
+)
+data4 = read_excel("SocialSciences_Dataset.xlsx", sheet='Chapter 5', range='A3:CD376', col_names=T) %>% drop_na()  %>% rename(
+  CBSA_Code = "CBSA\r\nCode",
+)
+total_data = data %>% inner_join(data1, data2, by="CBSA_Code")
+walkability = read.csv("EPA_SmartLocationDatabase_V3_Jan_2021_Final.csv")
+```
+
+```{r}
+changes = total_data %>% select("CBSA_Code", "Geographic area.x", "change_pct") %>% rename("CBSA" = "CBSA_Code")
+changes$CBSA = as.numeric(changes$CBSA)
+walking_changes = walkability %>% inner_join(changes, by="CBSA") %>% mutate_at(vars(-"CSA_Name", -"CBSA_Name"), as.numeric)
+```
+
+```{r}
+walking_changes %>% ggplot(mapping = aes(x=as.numeric(NatWalkInd), y=as.numeric(change_pct))) + 
+  geom_point(alpha=0.01, colour = "black", fill = "black", size = 1) + 
+  geom_smooth() + xlab("National Walkability Index") + ylab("% Change in Population")
+```
+```{r}
+categorical = walking_changes %>% mutate(
+  change_cat = cut_width(change_pct, width=10)
+)
+
+categorical %>% group_by(change_cat) %>% summarise(n = n(), NatWalkInd = mean(NatWalkInd)) %>% ggplot(aes(change_cat, n)) + geom_col() + theme_bw()
+categorical %>% group_by(change_cat) %>% summarise(n = n(), NatWalkInd = mean(NatWalkInd)) %>% ggplot(aes(change_cat, NatWalkInd, fill=n)) + geom_col() + xlab("% Change in Population") + ylab("National Walkability Index") + theme_bw()
+```
+```{r}
+data3 = data3 %>% mutate_at(
+  c("Percentage-point change in population by race and Hispanic origin, 2000 to 2010", "...89", "...90", "...91", "...92", "...93", "...94", "...95", "...96", "...97"), as.numeric 
+)
+
+demo_change = data3 %>% mutate(
+  zwhite = abs((`Percentage-point change in population by race and Hispanic origin, 2000 to 2010` - mean(`Percentage-point change in population by race and Hispanic origin, 2000 to 2010`)) / sd(`Percentage-point change in population by race and Hispanic origin, 2000 to 2010`)),
+  zblack = abs((...89 - mean(...89)) / sd(...89)),
+  znative = abs((...90 - mean(...90)) / sd(...90)),
+  zasian = abs((...91 - mean(...91)) / sd(...91)),
+  zpi = abs((...92 - mean(...92)) / sd(...92)),
+  zother = abs((...93 - mean(...93)) / sd(...93)),
+  zmulti = abs((...94 - mean(...94)) / sd(...94)),
+  zhisp = abs((...95 - mean(...95)) / sd(...95)),
+  znothisp = abs((...96 - mean(...96)) / sd(...96)),
+  znothispwhite = abs((...97 - mean(...97)) / sd(...97)),
+) %>% select("Largest race or Hispanic origin group, 2010", "...16", CBSA_Code, zwhite, zblack, znative, zasian, zpi, zother, zmulti, zhisp, znothisp, znothispwhite) %>% mutate(mu = zwhite + zblack + znative + zasian + zpi + zother + zmulti + zhisp + znothisp + znothispwhite) 
+
+demo_change %>% select(mu) %>% ggplot(aes(mu)) + geom_histogram() + xlab("Z-score change in racial demographics") + ylab("Count") + theme_bw()
+```
+
+```{r}
+demo_change = demo_change %>% mutate(CBSA = as.numeric(CBSA_Code))
+walkability_means = walkability %>% group_by(CBSA) %>% summarise(NatWalkInd = mean(NatWalkInd))
+demo_walk = demo_change %>% left_join(walkability_means, by="CBSA")
+demo_walk %>% ggplot(aes(NatWalkInd, mu)) + geom_point() + geom_smooth(method="lm") + ylim(0, NA) + xlab("National Walkability Index") + ylab("Z-score change in racial demographics") + theme_bw()
+demo_walk %>% ggplot(aes(NatWalkInd, mu, col=factor(...16))) + geom_point() + geom_smooth(method="lm") + ylim(0, NA) + xlab("National Walkability Index") + ylab("Z-score change in racial demographics") + labs(color="Largest group \n(excluding non-Hispanic\nWhite alone)") + theme_bw()
+demo_walk %>% group_by(...16) %>% summarise(n = n(), `Z-score change in racial demographics` = mean(mu, na.rm=T), `National Walkability Index` = mean(NatWalkInd, na.rm=T)) %>% rename("Largest group (excluding non-Hispanic White alone)" = "...16")
+```
+```{r}
+more = demo_walk %>% left_join(total_data, by="CBSA_Code")
+more$change_pct = as.numeric(more$change_pct)
+more %>% ggplot(aes(mu, change_pct)) + geom_point() + geom_smooth(method="lm") + xlab("Z-score change in racial demographics") + ylab("% change in population 2000-2010") + theme_bw()
+```
+```{r}
+data4 = data4 %>% mutate_at(
+  c("Percent change in population by age, 2000 to 2010", "...6", "...12", "...76", "...77", "...78", "...79", "...80", "...81", "...82"), as.numeric 
+)
+
+age_change = data4 %>% mutate(
+  zu18 = abs((`Percent change in population by age, 2000 to 2010` - mean(`Percent change in population by age, 2000 to 2010`)) / sd(`Percent change in population by age, 2000 to 2010`)),
+  zu24 = abs((...76 - mean(...76)) / sd(...76)),
+  zu34 = abs((...77 - mean(...77)) / sd(...77)),
+  zu44 = abs((...78 - mean(...78)) / sd(...78)),
+  zu54 = abs((...79 - mean(...79)) / sd(...79)),
+  zu64 = abs((...80 - mean(...80)) / sd(...80)),
+  zu74 = abs((...81 - mean(...81)) / sd(...81)),
+  zold = abs((...82 - mean(...82)) / sd(...82)),
+  dsexratio = `...12` - `...6`,
+) %>% select("...6", "...12", CBSA_Code, zu18, zu24, zu34, zu44, zu54, zu64, zu74, zold, dsexratio) %>% mutate(mu = zu18 + zu24 + zu34 + zu44 + zu54 + zu64 + zu74 + zold) 
+
+age_change %>% select(mu) %>% ggplot(aes(mu)) + geom_histogram() + theme_bw() + xlab("Z-score change in age demographics") + ylab("Count")
+```
+```{r}
+age_change = age_change %>% mutate(CBSA = as.numeric(CBSA_Code))
+age_walk = age_change %>% left_join(walkability_means, by="CBSA")
+age_walk %>% ggplot(aes(NatWalkInd, mu)) + geom_point() + geom_smooth(method="lm") + ylim(NA, 20) + xlab("National Walkability Index") + ylab("Z-score change in age demographics") + theme_bw()
+```
+```{r}
+more_age = age_walk %>% left_join(total_data, by="CBSA_Code")
+more_age$change_pct = as.numeric(more_age$change_pct)
+more_age %>% ggplot(aes(mu, change_pct)) + geom_point() + geom_smooth(method="lm") + xlim(NA, 20) + xlab("Z-score change in age-demographics") + ylab("% Change in population 2000-2010") + theme_bw()
+```
+
+```{r}
+both = more %>% left_join(age_change, by=("CBSA_Code"))
+both %>% ggplot(aes(mu.x, mu.y)) + geom_point() + geom_smooth(method="lm") + ylim(NA, 20) + theme_bw() + xlab("Z-score change in racial demographics") + ylab("Z-score change in age demographics")
+drop_na(both) %>% ggplot(aes(cut_width(mu.x, 2), cut_width(mu.y, 2))) + geom_tile(aes(fill=NatWalkInd)) + theme_bw() + xlab("Z-score change in racial demographics") + ylab("Z-score change in age demographics") + labs(fill="National\nWalkability\nIndex")
+```
+```{r}
+data3_rename = data3 %>% rename(
+  "White.change" = "Percentage-point change in population by race and Hispanic origin, 2000 to 2010",
+  "Black.change" = "...89",
+  "Native.change" = "...90",
+  "Asian.change" = "...91",
+  "AAPI.change" = "...92",
+  "Other.change" = "...93",
+  "Multi.change" = "...94",
+  "Hispanic.change" = "...95",
+  "Nonhispanic.change" = "...96",
+  "Nonhispanicwhite.change" = "...97",
+)
+data4_rename = data4 %>% rename(
+  "u18.change" = "Percent change in population by age, 2000 to 2010",
+  "u24.change" = "...76",
+  "u34.change" = "...77",
+  "u44.change" = "...78",
+  "u54.change" = "...79",
+  "u64.change" = "...80",
+  "u74.change" = "...81",
+  "old.change" = "...82",
+) %>% mutate(sexratio.change = `...12` - `...6`)
+
+walkability$NatWalkInd = as.numeric(walkability$NatWalkInd)
+just_walking = select(walkability, CBSA, NatWalkInd) %>% drop_na() %>% group_by(CBSA) %>% summarise(n = n(), "MeanNatWalkInd" = mean(NatWalkInd, rm.na=T)) %>% rename("CBSA_Code" = "CBSA")
+just_walking$CBSA_Code = as.character(just_walking$CBSA_Code)
+
+combo = total_data %>% left_join(data3_rename, by=("CBSA_Code")) %>% left_join(data4_rename, by="CBSA_Code") %>% inner_join(just_walking, by=c("CBSA_Code")) %>% select(
+  "White.change", "Black.change", "Native.change","Asian.change", "AAPI.change", "Other.change",  "Multi.change", "Hispanic.change","Nonhispanic.change","Nonhispanicwhite.change","sexratio.change", "MeanNatWalkInd", "change_pct"
+) %>% mutate_all(as.numeric)
+#  "u18.change", "u24.change", "u34.change", "u44.change", "u54.change", "u64.change", "u74.change", "old.change", 
+
+model = lm(change_pct ~ ., data=combo) %>% select_parameters()
+summary(model)
+res = resid(model)
+plot(fitted(model), res)
+abline(0,0)
+qqnorm(res)
+qqline(res) 
+plot(density(res))
+```
+```{r}
+combo %>% ggplot(aes(White.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in White population", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex")
+combo %>% ggplot(aes(AAPI.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in AAPI population", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex") + xlim(NA, 0.4)
+combo %>% ggplot(aes(Other.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in 'Other' population", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex")
+combo %>% ggplot(aes(Hispanic.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in Hispanic population", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex")
+combo %>% ggplot(aes(Nonhispanicwhite.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in Non-hispanic White population", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex")
+combo %>% ggplot(aes(sexratio.change, change_pct, color=MeanNatWalkInd)) + geom_point() + geom_smooth(method="lm") + theme_bw() + labs(x="Percentage-point change in Male-to-Female Ratio", y="% Change in Population 2000-2010", color="National\nWalkability\nIndex") + xlim(NA, 1)
+```
+
